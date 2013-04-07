@@ -266,7 +266,8 @@ public:
   void pub_hands();
   
   //pick out of given bin in correct time
-  void perform_task(size_t cur_bin, double dur_m, double dur_s);
+  double perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty);
+
   
   //calculate euclidean dist between two vectors
   double calc_euclid_dist(vector<double> vec_one, vector<double> vec_two);
@@ -608,6 +609,8 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
     size_t cur_bin_id, cur_bin_no=0;
 
     double duration_m, duration_s;
+    double time_to_next_touch = 0.0;
+    bool pick_lefty = false; //start picking from right hand
 
     //pop next task
     while(to_perform.get_next_step(&cur_bin_no, &duration_m, &duration_s, &cur_bin_id))
@@ -615,7 +618,9 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
 	//debug
 	cout<< "Task - Bin-"<<cur_bin_id<<" ; mean std = "<<duration_m<<' '<<duration_s<<endl;
 	
-	perform_task(cur_bin_id, duration_m, duration_s);
+	time_to_next_touch = perform_task(cur_bin_id, duration_m, duration_s, 
+					  time_to_next_touch, pick_lefty);
+	pick_lefty = !pick_lefty;
       }
     
     //after tasks complete, just publish the rest position
@@ -624,9 +629,23 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
   }
   
   //pick out of given bin in correct time
-  void handSim::perform_task(size_t cur_bin, double dur_m, double dur_s)
+double handSim::perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty)
   {
     vector<double> cur_bin_loc;
+    
+    //should be true only in case of picking the first bin
+    if (time_reach<=0)
+      {
+	time_reach = samp_gauss_pos(motion_mean, motion_std);
+	
+	//wait at current positions- for hand after touched a bin or initially 
+	//before reaching into the first bin
+	double waiting_time = time_to_wait();
+	wait_at_location(waiting_time);
+    	
+	//debug
+	cout<<"First bin"<<endl;
+      }
     
     //if bin to pick from unavailable
     if(!bin_in_position(cur_bin))
@@ -639,105 +658,49 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
 	is_rh_rest = true;
       }
 
+
     //after it becomes available
-    //sample gaussian to determine time to perform task
-    double time_task_rem = samp_gauss_pos(dur_m, dur_s);
-
-    //wait at current positions- for hand after touched a bin or initially 
-    //before reaching into the first bin
-    double waiting_time = time_to_wait();
-    time_task_rem -= waiting_time;
-    wait_at_location(waiting_time);
-    //add total time
-    total_time_steps += (waiting_time/PUB_RATE);
-    
-    //its more of a debugging measure- one hand at least be at rest
     cur_bin_loc = find_bin_pos(cur_bin);
-    if(!is_lh_rest && !is_rh_rest)
-      {
-	cout<<"Both hands not at rest"<<endl;
-	exit(-1);
-      }
-    //should happen at the beginning of a task or after spending some time 
-    //waiting
-    else if(is_rh_rest && is_lh_rest)
-      {
-	//just go with righty
-	double to_bin_time = samp_gauss_pos(motion_mean, motion_std);
-	
-	//if sampled time > time remaining then spend remaining time on moving
-	if (to_bin_time>=time_task_rem){to_bin_time=time_task_rem;}
-	else{
-	  //wait before performing task
-	  wait_at_location(time_task_rem-to_bin_time);
-	}
-	
-	//then move right to bin
-	move_to_loc(false, true, lh_cur, cur_bin_loc, to_bin_time);
-	//right-hand was moved
-	is_rh_rest = false;
-      }
-    else if(is_rh_rest)
-      {
-	double to_bin_time = samp_gauss_pos(motion_mean, motion_std);
-	double to_rest_time = samp_gauss_pos(motion_mean, motion_std);
-	double motion_time = to_bin_time+to_rest_time;
-	double wait_bw_bins;
-	//if sampled time > time remaining then spend remaining time on moving
-	if (motion_time>=time_task_rem)
+
+    //time to wait at bin
+    double wait_at_bin = time_to_wait();
+
+    //sample gaussian to determine time till next bin touch after present one
+    double time_task_do = samp_gauss_pos(dur_m, dur_s);
+
+    //time for interpolating b/w rest and next bin
+    double to_next_motion = samp_gauss_pos(motion_mean, motion_std);
+    double time_back_rest = samp_gauss_pos(motion_mean, motion_std);
+
+    //if sampled time < time for motion and waiting
+    if ((wait_at_bin+to_next_motion+time_back_rest)>=time_task_do)
 	  {
-	    //scale both times for motion to just fit within the actual time
-	    double time_scale = time_task_rem/motion_time;
-	    to_bin_time *= time_scale;
-	    to_rest_time *= time_scale;
-	    wait_bw_bins = 0;
-	  }else{wait_bw_bins = time_task_rem-motion_time;}
+	    //scale both times to just fit within the actual time
+	    double time_scale = time_task_do
+	      /(wait_at_bin+to_next_motion+time_back_rest);
+	    wait_at_bin *= time_scale;
+	    to_next_motion *= time_scale;
+	    time_back_rest *= time_scale;
+	    time_task_do = 0;
+	  }else{time_task_do -= (wait_at_bin+to_next_motion+time_back_rest);}
 
-	//first bring left to rest
-	move_to_loc(true, false, lh_rest, rh_cur, to_rest_time);
-	is_lh_rest = true;
-	
-	//use the parts retrieved
-	//wait_at_location(wait_bw_bins);
-	random_walking(wait_bw_bins, walk_dev);
-		
-	//then move right to bin
-	move_to_loc(false, true, lh_cur, cur_bin_loc, to_bin_time);
-	is_rh_rest = false;
-      }
+    
+    move_to_loc(pick_lefty, !pick_lefty, cur_bin_loc, cur_bin_loc, time_reach);
+    is_lh_rest = !pick_lefty;
+    is_rh_rest = pick_lefty;
 
-    else if(is_lh_rest)
-      {
+    //wait at the bin
+    wait_at_location(wait_at_bin);
 
-	double to_bin_time = samp_gauss_pos(motion_mean, motion_std);
-	double to_rest_time = samp_gauss_pos(motion_mean, motion_std);
-	double motion_time = to_bin_time+to_rest_time;
-	double wait_bw_bins;
-	//if sampled time > time remaining then spend remaining time on moving
-	if (motion_time>=time_task_rem)
-	  {
-	    //scale both times for motion to just fit within the actual time
-	    double time_scale = time_task_rem/motion_time;
-	    to_bin_time *= time_scale;
-	    to_rest_time *= time_scale;
-	    wait_bw_bins = 0;
-	  }else{wait_bw_bins = time_task_rem-motion_time;}
+    //move back to rest position
+    move_to_loc(!is_lh_rest, !is_rh_rest, lh_rest, rh_rest, time_back_rest);
 
-	//first bring right to rest
-	move_to_loc(false, true, lh_cur, rh_rest, to_rest_time);
-	is_rh_rest = true;
+    //use the parts retrieved
+    //wait_at_location(wait_bw_bins);
+    random_walking(time_task_do, walk_dev);
 
-	//use the parts retrieved
-	//wait_at_location(wait_bw_bins);
-	random_walking(wait_bw_bins, walk_dev);
-	
-	//then move left to bin
-	move_to_loc(true, false, cur_bin_loc, rh_cur, to_bin_time);
-	is_lh_rest = false;
-
-      }
-
-
+    //return the time for touching next bin
+    return to_next_motion;
   }
   
   //calculate euclidean dist between two vectors
@@ -967,9 +930,10 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
 	publish_cur_hand_pos();
 	++step_no;
 	loop_rate.sleep();
-	//increment total time
-	++total_time_steps;
       }
+    //add to total time
+    total_time_steps += tot_steps;
+
   }
 
 
@@ -1052,7 +1016,7 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
   //at bin
   double handSim::time_to_wait()
   {
-    //wait a half-second for the moment
+    //wait a tenth-of-second for the moment
     return 0.1;
   }
 
@@ -1193,6 +1157,9 @@ void handSim::random_walking(double walk_time, double std_dev)
 	++cur_step;	
 	loop_rate.sleep();
       }
+
+    //add to time
+    total_time_steps += time_steps;
     
     
 }
