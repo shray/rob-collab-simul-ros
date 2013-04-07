@@ -207,7 +207,6 @@ private:
   ros::Publisher viz_pub;
 
   ros::Subscriber ar_poses;
-  ros::Subscriber workspace_bins;
   
   project_simulation::AlvarMarkers cur_markers;
   
@@ -230,8 +229,6 @@ private:
   
   double motion_mean, motion_std;
   
-  vector<size_t> workspace_bin_list;
-
   //noise
   //this represents noise in the tracker
   double pub_noise_dev;
@@ -256,11 +253,6 @@ public:
 
   void read_ar(project_simulation::AlvarMarkers msg);
 
-
-  void listen_workspace(std_msgs::UInt8MultiArray work_bins);
-
-  //returns t/f if bin is/not in human workspace
-  bool bin_in_workspace(size_t bin_id);
 
   //does tasks in list
   void pub_hands();
@@ -336,9 +328,6 @@ handSim::handSim(string task_name, bool cheat)
     task_name += ".txt";
     to_perform.read_file(task_name);
 
-    //set workspace
-    workspace_bin_list.clear();
-    
     //set noise
     pub_noise_dev = 0.005;
     walk_dev = 0.03;
@@ -366,9 +355,6 @@ handSim::handSim(string task_name, bool cheat)
     total_time_steps = 0;
     wait_time_steps = 0;
 
-    //workspace
-    vector<vector <double> > work_locs;
-
     //frame
     frame_of_reference = "/kinect0_rgb_optical_frame";
     ar_pose_frame = "/lifecam1_optical_frame";
@@ -387,7 +373,6 @@ handSim::handSim(string task_name, bool cheat)
     viz_pub = nh.advertise<visualization_msgs::MarkerArray>("hands_viz", 1);
     
     ar_poses = nh.subscribe("ar_pose_marker_hum", 0, &handSim::read_ar, this);  
-    workspace_bins = nh.subscribe("workspace_bins", 0, &handSim::listen_workspace, this);
     
     //store transform
     tf::TransformListener tf_cam_to_kin;  
@@ -556,50 +541,6 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
     
     cur_bin_locations = temp_bin_locations;
     
-  }
-
-
-  void handSim::listen_workspace(std_msgs::UInt8MultiArray work_bins)
-  {
-    size_t n_bins = work_bins.data.size();
-    vector<size_t> temp_work;
-    temp_work.clear();
-
-    //debug
-    //cout<<endl<<"Work bins: (";
-
-    for (size_t i=0; i<n_bins; ++i)
-      {
-	temp_work.push_back(work_bins.data[i]);
-	
-	//debug
-	//cout<<temp_work[i]<<',';
-      }
-    
-    //debug
-    //cout<<')'<<endl;
-
-    workspace_bin_list.clear();
-    workspace_bin_list = temp_work;    
-  }
-  
-  //returns t/f if bin is/not in human workspace
-  bool handSim::bin_in_workspace(size_t bin_id)
-  {
-    size_t n_bins = workspace_bin_list.size();
-    bool bin_found = false;
-
-    for (size_t i=0; i<n_bins; i++)
-      {
-	if(bin_id == workspace_bin_list[i])
-	  {
-	    bin_found = true;
-	    break;
-	  } 
-      }
-
-    return bin_found;
-
   }
 
   //does tasks in list
