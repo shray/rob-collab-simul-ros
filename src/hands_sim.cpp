@@ -148,7 +148,7 @@ public:
   void read_file(string file)  {read_task(file);}
 
   //returns false if no step left
-  bool get_next_step(size_t* bin_no, double *dur_mean, double *dur_std, size_t* bin_id_to_go)//, string* b_nam, string* s_nam)
+  bool get_next_step(size_t* bin_no, double *dur_mean, double *dur_std, size_t* bin_id_to_go, string* t_nam)//, string* s_nam)
   {
     size_t cur_bin_no = *bin_no;
     Bin* cur_bin = &bin_list[cur_bin_no];
@@ -177,7 +177,7 @@ public:
     *bin_no = cur_bin_no;
     *dur_mean = cur_step.duration_mean;
     *dur_std = cur_step.duration_std;
-    
+    *t_nam = cur_step.step_name;
     //there is step to complete
     return true;
   }
@@ -205,6 +205,7 @@ private:
   ros::Publisher lh_pose;
   ros::Publisher rh_pose;
   ros::Publisher viz_pub;
+  ros::Publisher task_pub;
 
   ros::Subscriber ar_poses;
   
@@ -258,7 +259,7 @@ public:
   void pub_hands();
   
   //pick out of given bin in correct time
-  double perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty);
+  double perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty, string cur_task_name);
 
   
   //calculate euclidean dist between two vectors
@@ -371,6 +372,7 @@ handSim::handSim(string task_name, bool cheat)
     lh_pose = nh.advertise<geometry_msgs::PoseStamped>("left_hand",1);
     rh_pose = nh.advertise<geometry_msgs::PoseStamped>("right_hand",1);
     viz_pub = nh.advertise<visualization_msgs::MarkerArray>("hands_viz", 1);
+    task_pub = nh.advertise<std_msgs::String>("action_name", 1);
     
     ar_poses = nh.subscribe("ar_pose_marker_hum", 0, &handSim::read_ar, this);  
     
@@ -548,19 +550,20 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
   {
     
     size_t cur_bin_id, cur_bin_no=0;
-
+    string cur_task;
     double duration_m, duration_s;
     double time_to_next_touch = 0.0;
     bool pick_lefty = false; //start picking from right hand
 
     //pop next task
-    while(to_perform.get_next_step(&cur_bin_no, &duration_m, &duration_s, &cur_bin_id))
+    while(to_perform.get_next_step(&cur_bin_no, &duration_m, &duration_s, &cur_bin_id, &cur_task))
       {	
 	//debug
 	cout<< "Task - Bin-"<<cur_bin_id<<" ; mean std = "<<duration_m<<' '<<duration_s<<endl;
 	
 	time_to_next_touch = perform_task(cur_bin_id, duration_m, duration_s, 
-					  time_to_next_touch, pick_lefty);
+					  time_to_next_touch, pick_lefty, 
+					  cur_task);
 	pick_lefty = !pick_lefty;
       }
     
@@ -570,7 +573,7 @@ void handSim::mat_mul(double mat_one[], size_t mat_one_size[2], double mat_two[]
   }
   
   //pick out of given bin in correct time
-double handSim::perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty)
+double handSim::perform_task(size_t cur_bin, double dur_m, double dur_s, double time_reach, bool pick_lefty, string cur_task_name)
   {
     vector<double> cur_bin_loc;
     
@@ -630,9 +633,14 @@ double handSim::perform_task(size_t cur_bin, double dur_m, double dur_s, double 
     is_lh_rest = !pick_lefty;
     is_rh_rest = pick_lefty;
 
-    //wait at the bin
-    wait_at_location(wait_at_bin);
+    //publish action as soon as bin is touched
+    std_msgs::String task_msg;
+    task_msg.data= cur_task_name;
+    task_pub.publish(task_msg);
 
+    //wait at the bin
+    wait_at_location(wait_at_bin);    
+    
     //move back to rest position
     move_to_loc(!is_lh_rest, !is_rh_rest, lh_rest, rh_rest, time_back_rest);
 
@@ -1146,7 +1154,6 @@ void handSim::cheat_wait(size_t bin_to_chk)
 int main(int argc, char** argv)
 {
   ros::init(argc, argv, "hand_simulator");
-  cout<<"ROS initialized!"<<endl;
   char do_another='n';
 
   do{
