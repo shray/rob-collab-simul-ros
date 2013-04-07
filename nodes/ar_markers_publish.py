@@ -184,20 +184,6 @@ def add_bin_id(bin_n_loc):
     bins_locs.append(temp_bin)
     return
 
-def pub_workspace():
-    global bins_locs, workspace
-    work_bins = []
-
-    for loc in workspace:
-        for bin_loc in bins_locs:
-            if bin_loc['location']==loc:
-                work_bins.append(bin_loc['bin_id'])
-                break
-
-    work_msg  = std_msgs.msg.UInt8MultiArray()
-    work_msg.data = work_bins
-    return work_msg
-
 def pub_bins():
 
     global bin_locs, slocations, PUB_RATE, bin_for_removal, location_noise, orientation_noise
@@ -210,7 +196,6 @@ def pub_bins():
     #human gets actual bin positions
     pub_human = rospy.Publisher('ar_pose_marker_hum', project_simulation.msg.AlvarMarkers)
 
-    publish_work = rospy.Publisher('workspace_bins', std_msgs.msg.UInt8MultiArray)
     bin_rmv_sub = rospy.Subscriber('remove_bin', std_msgs.msg.UInt8, bin_rmv)
     bin_add_sub = rospy.Subscriber('add_bin', project_simulation.msg.bin_loc, add_bin_id)
     viz_pub = rospy.Publisher('ar_poses_visual', visualization_msgs.msg.MarkerArray)
@@ -317,9 +302,6 @@ def pub_bins():
         print ar_viz_markers
         time.sleep(40)'''
         
-        #publish workspace
-        publish_work.publish(pub_workspace())
-        
         #publish visual markers
         viz_msg = visualization_msgs.msg.MarkerArray()
         viz_msg.markers = ar_viz_markers
@@ -379,7 +361,8 @@ if __name__ == '__main__':
 
     # init 
     rospy.init_node('ar_pose_markers_pub')
-    #debug
+
+    #set transform for work-space locations
     set_wbs_transf()
 
     pub_bins()
