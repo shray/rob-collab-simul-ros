@@ -385,7 +385,7 @@ handSim::handSim(string task_name, bool cheat)
     rh_pose = nh.advertise<geometry_msgs::PoseStamped>("right_hand",1);
     viz_pub = nh.advertise<visualization_msgs::MarkerArray>("hands_viz", 1);
     
-    ar_poses = nh.subscribe("ar_pose_marker", 0, &handSim::read_ar, this);  
+    ar_poses = nh.subscribe("ar_pose_marker_hum", 0, &handSim::read_ar, this);  
     workspace_bins = nh.subscribe("workspace_bins", 0, &handSim::listen_workspace, this);
     
     //store transform

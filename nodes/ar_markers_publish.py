@@ -14,8 +14,9 @@ import random
 from math import exp
 import numpy as np
 import copy
-
+from transformations import quaternion_matrix, quaternion_inverse
 import tf
+import numpy as np
 
 #publish at Hz 
 PUB_RATE = 30
@@ -98,8 +99,71 @@ frame_of_reference = '/lifecam1_optical_frame'
 #which bin is to be removed
 bin_for_removal = None
 
+#noise for hand-touch in bin-frame
+hand_t_mean = [0.0091831, -0.13022, -0.022461]
+hand_t_cov = [[0.00020556, 1.7289e-05, 0.00015445], [1.7289e-05, 0.00052374, -3.6877e-05], [0.00015445, -3.6877e-05, 0.00058416]]
+
+#inverse transforms for workspace
+inv_trans = []
+
+#get the inverse transform of the work-bin frames
+def set_wbs_transf():
+    global workspace, slocations, inv_trans
+    inv_trans = []
+
+    for work_loc in workspace:
+        for slocation in slocations:
+            if work_loc == slocation['name']:
+                translation = copy.deepcopy(slocation['position'])
+                translation = np.array(translation)
+                quaternion = copy.deepcopy(slocation['orientation'])
+                rot_mat = quaternion_matrix(quaternion)
+                inv_trans.append({'name':slocation['name'], 
+                                  'translation': translation, 
+                                  'rotation': rot_mat})
+                break
+
+    return
+
+#samples from gaussian for hand-offset in marker's frame
+#returns the same number of samples as bins in workspace
+def samp_hand_offset():
+    global hand_t_mean, hand_t_cov, workspace
+    n = workspace.__len__()
+    samples = np.random.multivariate_normal(hand_t_mean,hand_t_cov,(n))
+    return samples
+
+#generate positions of workspace bins for the human
+def gen_locs_human():
+    global workspace, inv_trans
+    hand_t_locs = []
+    n = workspace.__len__()
+    sample_offs = samp_hand_offset()
+
+    for i in range(n):
+        cur_loc = workspace[i]
+        cur_off = list(sample_offs[i])
+        for trans in inv_trans:
+            if trans['name'] == cur_loc:
+                #homogenize
+                cur_off.append(1.)
+                homo_pos = np.array(cur_off)
+                #rotate
+                homo_pos = list(np.dot(homo_pos, trans['rotation']))
+                #translate
+                new_pos = np.array([homo_pos[0]/homo_pos[3], 
+                                    homo_pos[1]/homo_pos[3], 
+                                    homo_pos[2]/homo_pos[3]])
+                tran_by = trans['translation']
+                new_pos = [new_pos[i]+tran_by[i] for i in range(new_pos.__len__())]
+                hand_t_locs.append({'name':cur_loc, 'position':new_pos})
+                break
+    
+    return hand_t_locs
+
 #receive message to remove bin from publishing list
 def bin_rmv(bin_to_rmv_msg):
+
     bin_to_rmv = bin_to_rmv_msg.data
     global bins_locs, bin_for_removal
     
@@ -137,6 +201,7 @@ def pub_workspace():
 def pub_bins():
 
     global bin_locs, slocations, PUB_RATE, bin_for_removal, location_noise, orientation_noise
+    
 
     br = tf.TransformBroadcaster()
     #perturbed by gaussian noise, thought to simulate tracking noise
@@ -156,6 +221,10 @@ def pub_bins():
         ar_markers = []
         hum_ar_markers = []
         ar_viz_markers = []
+        
+        #generate human work positions
+        hum_locs = gen_locs_human()
+
 
         for bin in bins_locs:
 
@@ -164,7 +233,6 @@ def pub_bins():
             marker.pose.header.frame_id = frame_of_reference
             marker.id = bin['bin_id']
             
-            marker_unperturb = project_simulation.msg.AlvarMarker()
 
             temp_msg = visualization_msgs.msg.Marker()
             set_viz_marker(temp_msg, marker.id)
@@ -180,10 +248,15 @@ def pub_bins():
                     marker.pose.pose.orientation.z = slocation['orientation'][2]
                     marker.pose.pose.orientation.w = slocation['orientation'][3]
                     
-                    marker_unperturb = copy.deepcopy(marker)
-                    
-                    #add unperturbed to human list
-                    hum_ar_markers.append(marker_unperturb)
+                    #add only work bins in human list
+                    for hum_loc in hum_locs:
+                        if hum_loc['name'] == slocation['name']:
+                            marker_human = copy.deepcopy(marker)
+                            marker_human.pose.pose.position.x = hum_loc['position'][0]          
+                            marker_human.pose.pose.position.y = hum_loc['position'][1]                       
+                            marker_human.pose.pose.position.z = hum_loc['position'][2]
+                            hum_ar_markers.append(marker_human)
+                            break
                     
                     #add gaussian noise
                     marker = add_gauss_noise(marker)
@@ -306,5 +379,7 @@ if __name__ == '__main__':
 
     # init 
     rospy.init_node('ar_pose_markers_pub')
+    #debug
+    set_wbs_transf()
 
     pub_bins()
