@@ -780,8 +780,7 @@ double handSim::perform_task(size_t cur_bin, double dur_m, double dur_s, double 
       {
 	if(cur_bin_locations[i].id == chk_bin)
 	  {
-	    if(bin_in_workspace(chk_bin)){return true;}
-	    else{break;}
+	    return true;
 	  }
       }
     return false;
