@@ -10,8 +10,10 @@ from geometry_msgs.msg import *
 from project_simulation.msg import *
 from visualization_msgs.msg import *
 from std_msgs.msg import *
-from random import random
+import random
 from math import exp
+import numpy as np
+import copy
 
 import tf
 
@@ -20,6 +22,10 @@ PUB_RATE = 30
 
 #Human-Workspace
 workspace = ['L0', 'L1', 'L2']
+
+#noise
+location_noise = 0.006
+orientation_noise = 0.025
 
 #possible locations
 slocations = [ 
@@ -130,11 +136,15 @@ def pub_workspace():
 
 def pub_bins():
 
-    global bin_locs, slocations, PUB_RATE, bin_for_removal
+    global bin_locs, slocations, PUB_RATE, bin_for_removal, location_noise, orientation_noise
 
     br = tf.TransformBroadcaster()
-    
+    #perturbed by gaussian noise, thought to simulate tracking noise
     pub = rospy.Publisher('ar_pose_marker', project_simulation.msg.AlvarMarkers)
+
+    #human gets actual bin positions
+    pub_human = rospy.Publisher('ar_pose_marker_hum', project_simulation.msg.AlvarMarkers)
+
     publish_work = rospy.Publisher('workspace_bins', std_msgs.msg.UInt8MultiArray)
     bin_rmv_sub = rospy.Subscriber('remove_bin', std_msgs.msg.UInt8, bin_rmv)
     bin_add_sub = rospy.Subscriber('add_bin', project_simulation.msg.bin_loc, add_bin_id)
@@ -144,6 +154,7 @@ def pub_bins():
 
     while not rospy.is_shutdown() :
         ar_markers = []
+        hum_ar_markers = []
         ar_viz_markers = []
 
         for bin in bins_locs:
@@ -152,6 +163,8 @@ def pub_bins():
             marker.header.frame_id = frame_of_reference
             marker.pose.header.frame_id = frame_of_reference
             marker.id = bin['bin_id']
+            
+            marker_unperturb = project_simulation.msg.AlvarMarker()
 
             temp_msg = visualization_msgs.msg.Marker()
             set_viz_marker(temp_msg, marker.id)
@@ -166,42 +179,66 @@ def pub_bins():
                     marker.pose.pose.orientation.y = slocation['orientation'][1]
                     marker.pose.pose.orientation.z = slocation['orientation'][2]
                     marker.pose.pose.orientation.w = slocation['orientation'][3]
-
-                    temp_msg.pose = marker.pose.pose
                     
-                    br.sendTransform( slocation['position'], 
+                    marker_unperturb = copy.deepcopy(marker)
+                    
+                    #add unperturbed to human list
+                    hum_ar_markers.append(marker_unperturb)
+                    
+                    #add gaussian noise
+                    marker = add_gauss_noise(marker)
+                    
+                    #visual marker
+                    temp_msg.pose = copy.deepcopy(marker.pose.pose)
+                    
+                    #add to ar_pose list and visual list
+                    ar_markers.append(marker)
+                    ar_viz_markers.append(temp_msg)
+                    
+
+                    '''br.sendTransform( slocation['position'], 
                                       slocation['orientation'], 
                                       rospy.Time.now(), 
                                       'Bin_'+str(bin['bin_id'])+'__'
-                                                 +str(bin['location']), frame_of_reference)
-                    '''#debug
-                    print temp_msg
-                    time.sleep(5)'''
+                                      +str(bin['location']), 
+                                      frame_of_reference)'''
+                    #post to tf
+                    temp_tf_pos = (marker.pose.pose.position.x, 
+                                   marker.pose.pose.position.y, 
+                                   marker.pose.pose.position.z)
+                    temp_tf_orient = (marker.pose.pose.orientation.x, 
+                                      marker.pose.pose.orientation.y, 
+                                      marker.pose.pose.orientation.z,
+                                      marker.pose.pose.orientation.w)
+                    br.sendTransform( temp_tf_pos, 
+                                      temp_tf_orient, 
+                                      rospy.Time.now(), 
+                                      'ar_marker_'+str(bin['bin_id']), 
+                                      frame_of_reference)
 
-                    #print marker
-                    #time.sleep(1)
-                    ar_markers.append(marker)
-                    ar_viz_markers.append(temp_msg)
+                    
 
                     '''#debug
                     print ar_viz_markers
                     time.sleep(10)'''
 
-        #add delete visual marker for bin removed
+        #add a delete visual marker for bin removed
         if not bin_for_removal == None:
             temp_marker = gen_delete_bin(bin_for_removal)
             ar_viz_markers.append(temp_marker)
             bin_for_removal = None
                     
-        #print markers
-        #time.sleep(100)
+        #publish markers to 'ar_pose_marker'
         msg = project_simulation.msg.AlvarMarkers()
         msg.header.frame_id = frame_of_reference
         msg.markers = ar_markers
-        #print msg
-        #time.sleep(200)
-        #break
         pub.publish(msg)
+
+        #publish markers to 'hum_ar_pose_marker'
+        msg_hum = project_simulation.msg.AlvarMarkers()
+        msg_hum.header.frame_id = frame_of_reference
+        msg_hum.markers = hum_ar_markers
+        pub_human.publish(msg_hum)
         
         '''#debug
         print ar_viz_markers
@@ -216,6 +253,18 @@ def pub_bins():
         viz_pub.publish(viz_msg)
         
         r.sleep()
+
+#add gaussian noise to msg
+def add_gauss_noise(marker):
+    marker.pose.pose.position.x += random.gauss(0.0, location_noise)
+    marker.pose.pose.position.y += random.gauss(0.0, location_noise)
+    marker.pose.pose.position.z += random.gauss(0.0, location_noise)
+    marker.pose.pose.orientation.x += random.gauss(0.0, orientation_noise)
+    marker.pose.pose.orientation.y += random.gauss(0.0, orientation_noise)
+    marker.pose.pose.orientation.z += random.gauss(0.0, orientation_noise)
+    marker.pose.pose.orientation.w += random.gauss(0.0, orientation_noise)
+    
+    return marker
         
 #return a visualization marker that deletes argument bin id
 def gen_delete_bin(rmv_bin_id):
