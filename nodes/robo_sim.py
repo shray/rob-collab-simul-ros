@@ -133,11 +133,11 @@ def listen_ar(markers_msg):
         print "loc  : " + e_loc 
     '''
 
-#check whether position received matches to stored location within a percent
+#check whether position received matches to stored location within 15 percent
 def check_pos_match(pos_tup, pos_point):
-    perc_x = abs(pos_point.x/100)
-    perc_y = abs(pos_point.y/100)
-    perc_z = abs(pos_point.z/100)
+    perc_x = 15*abs(pos_point.x/100)
+    perc_y = 15*abs(pos_point.y/100)
+    perc_z = 15*abs(pos_point.z/100)
     
     if (abs(pos_tup[0]-pos_point.x) > perc_x):
         return False
