@@ -192,13 +192,17 @@ def pub_bins():
     br = tf.TransformBroadcaster()
     #perturbed by gaussian noise, thought to simulate tracking noise
     pub = rospy.Publisher('ar_pose_marker', project_simulation.msg.AlvarMarkers)
-
     #human gets actual bin positions
     pub_human = rospy.Publisher('ar_pose_marker_hum', project_simulation.msg.AlvarMarkers)
+    #location of bins to robot simulator
+    pub_robo = rospy.Publisher('bins_robo_sim', project_simulation.msg.bins_loc)
+    #ROS-viz
+    viz_pub = rospy.Publisher('ar_poses_visual', visualization_msgs.msg.MarkerArray)
 
+    #subscribers- add/remove bin from list
     bin_rmv_sub = rospy.Subscriber('remove_bin', std_msgs.msg.UInt8, bin_rmv)
     bin_add_sub = rospy.Subscriber('add_bin', project_simulation.msg.bin_loc, add_bin_id)
-    viz_pub = rospy.Publisher('ar_poses_visual', visualization_msgs.msg.MarkerArray)
+
     
     r = rospy.Rate(PUB_RATE)
 
@@ -206,12 +210,19 @@ def pub_bins():
         ar_markers = []
         hum_ar_markers = []
         ar_viz_markers = []
-        
+        markers_robo = []
+
         #generate human work positions
         hum_locs = gen_locs_human()
 
-
+        
         for bin in bins_locs:
+            
+            #message for robo-sim
+            temp_bin_loc = project_simulation.msg.bin_loc()
+            temp_bin_loc.bin_id.data = bin['bin_id']
+            temp_bin_loc.location.data = bin['location']
+            markers_robo.append(temp_bin_loc)
 
             marker = project_simulation.msg.AlvarMarker()
             marker.header.frame_id = frame_of_reference
@@ -297,6 +308,11 @@ def pub_bins():
         msg_hum.header.frame_id = frame_of_reference
         msg_hum.markers = hum_ar_markers
         pub_human.publish(msg_hum)
+
+        #publish to robot simulator
+        robo_msg = project_simulation.msg.bins_loc()
+        robo_msg.bin_array = markers_robo        
+        pub_robo.publish(robo_msg)
         
         '''#debug
         print ar_viz_markers
