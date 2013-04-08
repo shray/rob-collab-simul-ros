@@ -93,18 +93,15 @@ endfactor_cur_pos = [0.226263331563,0.225740063166,1.17398472964]
 
 endfactor_fix_orientation = [0.0, 1.0, 0.0, 0.0]
 
-def listen_ar(markers_msg):
+def listen_bin_loc(bin_loc_msg):
     global cur_bin_list, empty_locations, slocations
-    cur_bin_list = []
-    temp_markers = markers_msg.markers
-    
+
     #add bins to current bin list
-    for a_marker in temp_markers:
-        temp_bin_id = a_marker.id        
+    cur_bin_list = []
+    for temp_bin_msg in bin_loc_msg.bin_array:
         for slocation in slocations:
-            if check_pos_match(slocation['position'], 
-                               a_marker.pose.pose.position):
-                temp_bin = {'id':temp_bin_id, 'location':slocation['name']}
+            if slocation['name'] == temp_bin_msg.location.data:
+                temp_bin = {'id':temp_bin_msg.bin_id.data, 'location':slocation['name']}
                 cur_bin_list.append(temp_bin)
                 break
     
@@ -135,9 +132,9 @@ def listen_ar(markers_msg):
 
 #check whether position received matches to stored location within 15 percent
 def check_pos_match(pos_tup, pos_point):
-    perc_x = 15*abs(pos_point.x/100)
-    perc_y = 15*abs(pos_point.y/100)
-    perc_z = 15*abs(pos_point.z/100)
+    perc_x = 5*abs(pos_point.x/100)
+    perc_y = 5*abs(pos_point.y/100)
+    perc_z = 5*abs(pos_point.z/100)
     
     if (abs(pos_tup[0]-pos_point.x) > perc_x):
         return False
@@ -429,8 +426,8 @@ if __name__=='__main__':
     #ros
     rospy.init_node('robo_bin_mover')
 
-    ar_sub = rospy.Subscriber('ar_pose_marker', project_simulation.msg.AlvarMarkers, listen_ar);
-
+    bin_loc_sub = rospy.Subscriber('bins_robo_sim', project_simulation.msg.bins_loc, listen_bin_loc)
+    
     endf_pub = rospy.Publisher('endfactor_pose', geometry_msgs.msg.PoseStamped)
     
     rmv_bin_pub = rospy.Publisher('remove_bin', std_msgs.msg.UInt8)
